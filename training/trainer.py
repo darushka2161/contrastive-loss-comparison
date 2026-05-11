@@ -187,6 +187,9 @@ def train_one_run(cfg: ExperimentConfig, lr: float, run_dir: str,
     tokenizer = get_tokenizer(model_name)
     model = SentenceEncoder(model_name, cfg.pooling).to(device)
 
+    freeze_info = model.freeze_except_last_n(cfg.training.num_trainable_layers)
+    print(f"  {freeze_info}")
+
     # Evaluation uses STS val (dev) during training; test is held out for final eval
     sts_val = load_sts_processed("data/processed", "val")
 

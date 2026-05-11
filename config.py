@@ -42,6 +42,7 @@ class TrainingConfig:
     eval_steps: int = 500
     save_steps: int = 1000
     max_train_samples: Optional[int] = None
+    num_trainable_layers: int = 2  # 0 = train all; N = freeze all except last N transformer blocks
 
 
 @dataclass

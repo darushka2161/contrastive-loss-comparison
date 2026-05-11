@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
-from typing import Dict, Literal
+from typing import Dict
 
 
 class SentenceEncoder(nn.Module):
@@ -48,6 +48,44 @@ class SentenceEncoder(nn.Module):
             emb = self.encode_batch(enc)
             all_embeddings.append(emb.cpu())
         return torch.cat(all_embeddings, dim=0)
+
+    def freeze_except_last_n(self, num_trainable_layers: int = 2) -> str:
+        """
+        Freeze everything except the last num_trainable_layers transformer blocks.
+        Returns a summary string for logging.
+        """
+        if num_trainable_layers <= 0:
+            return "All layers trainable (no freezing)"
+
+        # Freeze embeddings
+        for param in self.encoder.embeddings.parameters():
+            param.requires_grad = False
+
+        # Get transformer layers — works for BERT, RoBERTa, MiniLM (all share .encoder.layer)
+        transformer_layers = self.encoder.encoder.layer
+        num_layers = len(transformer_layers)
+
+        # Freeze all transformer layers first
+        for layer in transformer_layers:
+            for param in layer.parameters():
+                param.requires_grad = False
+
+        # Unfreeze last N layers
+        n = min(num_trainable_layers, num_layers)
+        for layer in transformer_layers[-n:]:
+            for param in layer.parameters():
+                param.requires_grad = True
+
+        # Keep pooler trainable (used for CLS pooling)
+        if hasattr(self.encoder, "pooler") and self.encoder.pooler is not None:
+            for param in self.encoder.pooler.parameters():
+                param.requires_grad = True
+
+        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        total     = sum(p.numel() for p in self.parameters())
+        return (f"Frozen: layers 0–{num_layers - n - 1} + embeddings | "
+                f"Trainable: last {n} layers + pooler | "
+                f"{trainable:,} / {total:,} params ({100 * trainable / total:.1f}%)")
 
 
 def get_tokenizer(model_name: str):
