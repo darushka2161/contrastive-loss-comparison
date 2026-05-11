@@ -10,7 +10,7 @@ loss:
 training:
   batch_size: 64
   lr: 2e-5
-  epochs: 3
+  epochs: 10
   warmup_steps: 100
   gradient_accumulation_steps: 1
   fp16: true

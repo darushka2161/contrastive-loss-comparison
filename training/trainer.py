@@ -23,7 +23,10 @@ from data_utils.dataset_utils import (
     collate_pair, collate_triplet, collate_cosine,
 )
 from data_utils.prepare_nli import load_processed
-from data_utils.prepare_sts import load_sts_processed, load_sts_cosine_tuples
+from data_utils.prepare_sts import (
+    load_sts_processed, load_sts_cosine_tuples,
+    load_sts_pair_tuples, load_sts_triplet_tuples,
+)
 from evaluation.sts_evaluator import evaluate_on_sts
 from training.train_utils import set_seed, get_device, CSVLogger
 
@@ -62,11 +65,24 @@ def _make_nli_loader(cfg: ExperimentConfig, tokenizer, max_samples: Optional[int
 
 
 def _make_sts_loader(cfg: ExperimentConfig, tokenizer) -> DataLoader:
-    """Build DataLoader for STS train split (always CosineSimilarityLoss format)."""
-    data = load_sts_cosine_tuples("data/processed")
-    dataset = NLICosineDataset(data)
-    collate_fn = partial(collate_cosine, tokenizer=tokenizer, max_length=128)
-    return DataLoader(dataset, batch_size=min(cfg.training.batch_size, 32), shuffle=True,
+    """Build DataLoader for STS train split. Format depends on loss type."""
+    loss_type = cfg.loss.type
+    bs = min(cfg.training.batch_size, 32)
+
+    if loss_type == "info_nce":
+        data = load_sts_pair_tuples("data/processed")
+        dataset = NLIPairDataset(data)
+        collate_fn = partial(collate_pair, tokenizer=tokenizer, max_length=128)
+    elif loss_type == "triplet":
+        data = load_sts_triplet_tuples("data/processed")
+        dataset = NLITripletDataset(data)
+        collate_fn = partial(collate_triplet, tokenizer=tokenizer, max_length=128)
+    else:
+        data = load_sts_cosine_tuples("data/processed")
+        dataset = NLICosineDataset(data)
+        collate_fn = partial(collate_cosine, tokenizer=tokenizer, max_length=128)
+
+    return DataLoader(dataset, batch_size=bs, shuffle=True,
                       num_workers=0, collate_fn=collate_fn, drop_last=False)
 
 
@@ -231,8 +247,7 @@ def train_one_run(cfg: ExperimentConfig, lr: float, run_dir: str,
                 break
 
     elif cfg.training_mode == TRAINING_MODE_STS_ONLY:
-        # STS-only always uses CosineSimilarityLoss regardless of cfg.loss.type
-        stage_loss_fn = CosineSimilarityLoss()
+        stage_loss_fn = build_loss(cfg)
         train_loader = _make_sts_loader(cfg, tokenizer)
         total_steps = (cfg.training.epochs * len(train_loader)
                        // cfg.training.gradient_accumulation_steps)
@@ -247,7 +262,6 @@ def train_one_run(cfg: ExperimentConfig, lr: float, run_dir: str,
             global_step, _, diverged = _train_epoch(
                 model, stage_loss_fn, train_loader, optimizer, scheduler,
                 scaler, cfg, device, use_amp, epoch, global_step, train_logger,
-                loss_type_override="cosine",
             )
             epoch_time = time.time() - t0
             epochs_run = epoch

@@ -1,5 +1,6 @@
 import os
 import pickle
+import random
 from typing import List, Dict, Tuple
 from datasets import load_dataset
 from tqdm import tqdm
@@ -49,20 +50,56 @@ def prepare_sts_and_save(processed_dir: str = "data/processed", cache_dir: str =
         with open(os.path.join(processed_dir, "sts_val.pkl"), "wb") as f:
             pickle.dump(val_samples, f)
 
-    # STS train — for Stage 2 fine-tuning with human similarity annotations
+    # STS train — for fine-tuning with human similarity annotations
     try:
         train_samples = _load_sts_split("train", cache_dir)
         with open(os.path.join(processed_dir, "sts_train.pkl"), "wb") as f:
             pickle.dump(train_samples, f)
-        # Also save as cosine tuples for direct use in NLICosineDataset
+
+        # cosine tuples: (s1, s2, score)
         train_tuples = [(s["sentence1"], s["sentence2"], s["score"]) for s in train_samples]
         with open(os.path.join(processed_dir, "sts_train_cosine.pkl"), "wb") as f:
             pickle.dump(train_tuples, f)
+
+        # pair tuples for InfoNCE: (anchor, positive) — high-similarity pairs
+        pairs = _build_sts_pairs(train_samples, min_score=0.5)
+        with open(os.path.join(processed_dir, "sts_train_pairs.pkl"), "wb") as f:
+            pickle.dump(pairs, f)
+
+        # triplet tuples for TripletLoss: (anchor, positive, negative)
+        triplets = _build_sts_triplets(train_samples, pos_threshold=0.6, neg_threshold=0.3)
+        with open(os.path.join(processed_dir, "sts_train_triplets.pkl"), "wb") as f:
+            pickle.dump(triplets, f)
+
+        print(f"  STS train pairs: {len(pairs)}, triplets: {len(triplets)}")
     except Exception as e:
         print(f"Warning: could not load STS train split: {e}")
         train_samples = []
 
     return test_samples, val_samples, train_samples
+
+
+def _build_sts_pairs(samples: List[Dict], min_score: float = 0.5) -> List[Tuple[str, str]]:
+    """High-similarity STS pairs as (anchor, positive) for InfoNCE."""
+    return [(s["sentence1"], s["sentence2"]) for s in samples if s["score"] >= min_score]
+
+
+def _build_sts_triplets(samples: List[Dict],
+                         pos_threshold: float = 0.6,
+                         neg_threshold: float = 0.3) -> List[Tuple[str, str, str]]:
+    """Construct (anchor, positive, negative) from STS pairs by score thresholds."""
+    high = [(s["sentence1"], s["sentence2"]) for s in samples if s["score"] >= pos_threshold]
+    low  = [(s["sentence1"], s["sentence2"]) for s in samples if s["score"] <= neg_threshold]
+    if not low:  # fallback: use all sentences as potential negatives
+        all_sents = list({s["sentence2"] for s in samples})
+        low = [(s, s) for s in all_sents]
+
+    triplets = []
+    for anchor, positive in high:
+        neg_s1, neg_s2 = random.choice(low)
+        negative = neg_s2 if neg_s2 != anchor else neg_s1
+        triplets.append((anchor, positive, negative))
+    return triplets
 
 
 def load_sts_processed(processed_dir: str = "data/processed", split: str = "test") -> List[Dict]:
@@ -82,7 +119,20 @@ def load_sts_processed(processed_dir: str = "data/processed", split: str = "test
 
 
 def load_sts_cosine_tuples(processed_dir: str = "data/processed") -> List[Tuple[str, str, float]]:
-    """Load STS train split as (s1, s2, score) for CosineSimilarityLoss fine-tuning."""
     path = os.path.join(processed_dir, "sts_train_cosine.pkl")
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def load_sts_pair_tuples(processed_dir: str = "data/processed") -> List[Tuple[str, str]]:
+    """STS high-similarity pairs for InfoNCE."""
+    path = os.path.join(processed_dir, "sts_train_pairs.pkl")
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def load_sts_triplet_tuples(processed_dir: str = "data/processed") -> List[Tuple[str, str, str]]:
+    """STS triplets for TripletLoss."""
+    path = os.path.join(processed_dir, "sts_train_triplets.pkl")
     with open(path, "rb") as f:
         return pickle.load(f)
