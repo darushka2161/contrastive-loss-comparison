@@ -18,12 +18,12 @@ from models.sentence_encoder import SentenceEncoder, get_tokenizer
 from losses.info_nce import InfoNCELoss
 from losses.triplet import TripletLoss
 from losses.cosine_loss import CosineSimilarityLoss
-from datasets.dataset_utils import (
+from data_utils.dataset_utils import (
     NLIPairDataset, NLITripletDataset, NLICosineDataset,
     collate_pair, collate_triplet, collate_cosine,
 )
-from datasets.prepare_nli import load_processed
-from datasets.prepare_sts import load_sts_processed, load_sts_cosine_tuples
+from data_utils.prepare_nli import load_processed
+from data_utils.prepare_sts import load_sts_processed, load_sts_cosine_tuples
 from evaluation.sts_evaluator import evaluate_on_sts
 from training.train_utils import set_seed, get_device, CSVLogger
 

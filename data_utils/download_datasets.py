@@ -6,8 +6,8 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from datasets.prepare_nli import prepare_and_save
-from datasets.prepare_sts import prepare_sts_and_save
+from data_utils.prepare_nli import prepare_and_save
+from data_utils.prepare_sts import prepare_sts_and_save
 
 
 def main():

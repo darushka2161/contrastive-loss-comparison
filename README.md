@@ -61,13 +61,13 @@ pip install -r requirements.txt
 ## Скачивание датасетов
 
 ```bash
-python datasets/download_datasets.py
+python data_utils/download_datasets.py
 ```
 
 Для быстрого тестирования (ограничить NLI выборку):
 
 ```bash
-python datasets/download_datasets.py --max_samples 10000
+python data_utils/download_datasets.py --max_samples 10000
 ```
 
 Что скачивается:

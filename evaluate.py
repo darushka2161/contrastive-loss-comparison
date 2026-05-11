@@ -7,7 +7,7 @@ import torch
 
 from config import load_config
 from models.sentence_encoder import SentenceEncoder, get_tokenizer
-from datasets.prepare_sts import load_sts_processed
+from data_utils.prepare_sts import load_sts_processed
 from evaluation.sts_evaluator import detailed_evaluation
 from evaluation.embedding_metrics import (
     get_embeddings_for_visualization, reduce_with_pca, reduce_with_tsne,
