@@ -25,7 +25,7 @@ from datasets.dataset_utils import (
 from datasets.prepare_nli import load_processed
 from datasets.prepare_sts import load_sts_processed, load_sts_cosine_tuples
 from evaluation.sts_evaluator import evaluate_on_sts
-from training.train_utils import set_seed, get_device, CSVLogger, EarlyStopping
+from training.train_utils import set_seed, get_device, CSVLogger
 
 
 def build_loss(cfg: ExperimentConfig) -> nn.Module:
@@ -177,8 +177,6 @@ def train_one_run(cfg: ExperimentConfig, lr: float, run_dir: str,
     use_amp = cfg.training.fp16 and device.type == "cuda"
     scaler = GradScaler() if use_amp else None
 
-    early_stopper = EarlyStopping(patience=cfg.training.early_stopping_patience)
-
     train_logger = CSVLogger(
         os.path.join(run_dir, "logs", "train_log.csv"),
         ["epoch", "step", "train_loss", "learning_rate", "grad_norm"],
@@ -189,6 +187,7 @@ def train_one_run(cfg: ExperimentConfig, lr: float, run_dir: str,
     )
 
     best_spearman = -1.0
+    best_epoch = 0
     global_step = 0
     start_time = time.time()
     diverged = False
@@ -223,12 +222,12 @@ def train_one_run(cfg: ExperimentConfig, lr: float, run_dir: str,
 
             if spearman > best_spearman:
                 best_spearman = spearman
+                best_epoch = epoch
                 torch.save(model.state_dict(),
                            os.path.join(run_dir, "checkpoints", "best_model.pt"))
+                print(f"    ↑ New best checkpoint (epoch {epoch})")
 
-            if diverged or early_stopper(spearman):
-                if not diverged:
-                    print(f"  Early stopping at epoch {epoch}")
+            if diverged:
                 break
 
     elif cfg.training_mode == TRAINING_MODE_STS_ONLY:
@@ -261,10 +260,12 @@ def train_one_run(cfg: ExperimentConfig, lr: float, run_dir: str,
 
             if spearman > best_spearman:
                 best_spearman = spearman
+                best_epoch = epoch
                 torch.save(model.state_dict(),
                            os.path.join(run_dir, "checkpoints", "best_model.pt"))
+                print(f"    ↑ New best checkpoint (epoch {epoch})")
 
-            if diverged or early_stopper(spearman):
+            if diverged:
                 break
 
     # ── Stage 2: STS fine-tuning (only for nli_plus_sts) ─────────────────────
@@ -306,18 +307,21 @@ def train_one_run(cfg: ExperimentConfig, lr: float, run_dir: str,
 
             if spearman > best_spearman:
                 best_spearman = spearman
+                best_epoch = epochs_run + ft_epoch
                 torch.save(model.state_dict(),
                            os.path.join(run_dir, "checkpoints", "best_model_ft.pt"))
+                print(f"    ↑ New best checkpoint (ft epoch {ft_epoch})")
     else:
         spearman_before_ft = None
 
-    # ── Final evaluation on STS test ─────────────────────────────────────────
+    # ── Final evaluation on STS test — loads best val checkpoint ─────────────
     sts_test = load_sts_processed("data/processed", "test")
     ckpt = os.path.join(run_dir, "checkpoints", "best_model_ft.pt")
     if not os.path.exists(ckpt):
         ckpt = os.path.join(run_dir, "checkpoints", "best_model.pt")
     if os.path.exists(ckpt):
         model.load_state_dict(torch.load(ckpt, map_location=device))
+        print(f"  Loaded best checkpoint (epoch {best_epoch}, val Spearman={best_spearman:.4f})")
     final_spearman = evaluate_on_sts(model, tokenizer, sts_test, device)
     print(f"  Final Spearman (test): {final_spearman:.4f}")
 
@@ -329,6 +333,7 @@ def train_one_run(cfg: ExperimentConfig, lr: float, run_dir: str,
         "learning_rate": lr,
         "best_spearman_val": best_spearman,
         "best_spearman_test": final_spearman,
+        "best_epoch": best_epoch,
         "spearman_before_sts_ft": spearman_before_ft,
         "training_time": round(training_time, 2),
         "epochs_run": epochs_run,
