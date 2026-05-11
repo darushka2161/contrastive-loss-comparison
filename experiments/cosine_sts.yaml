@@ -1,0 +1,32 @@
+# Training on STS train split with human similarity annotations.
+# Uses CosineSimilarityLoss: MSE(cosine_sim(emb1, emb2), normalized_human_score)
+# Validation on STS dev. Final eval on STS test (held out).
+
+model_name: bert-base-uncased
+pooling: mean
+experiment_name: cosine_sts
+training_mode: sts_only
+
+loss:
+  type: cosine
+
+training:
+  batch_size: 32
+  lr: 2e-5
+  epochs: 5
+  sts_finetune_epochs: 0
+  warmup_steps: 50
+  gradient_accumulation_steps: 1
+  fp16: true
+  max_grad_norm: 1.0
+  early_stopping_patience: 5
+  max_train_samples: null
+
+learning_rates:
+  - 1.0e-5
+  - 2.0e-5
+  - 3.0e-5
+  - 5.0e-5
+
+output_dir: outputs
+seed: 42
