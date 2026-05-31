@@ -1,234 +1,449 @@
-# Contrastive Loss Comparison for Sentence Embeddings
+# Влияние выбора контрастивной функции потерь на качество обучения предложенческих эмбеддингов
 
-**«Влияние выбора контрастивной функции потерь на качество обучения предложенческих эмбеддингов»**
-
----
-
-## Обоснование выбора функций потерь
-
-Три выбранные функции представляют принципиально разные подходы к обучению sentence embeddings:
-
-| Loss | Тип подхода | Ключевая идея |
-|------|-------------|---------------|
-| **InfoNCE** | Contrastive learning | Сближает positive пары, отталкивает все остальные в batch через softmax |
-| **Triplet Loss** | Metric learning | Обучает относительным расстояниям: d(a,n) > d(a,p) + margin |
-| **Cosine Similarity Loss** | Regression-based | MSE между cosine_sim(emb1, emb2) и целевым скором схожести |
-
-**Почему именно эти три:**
-- InfoNCE концептуально близок к `MultipleNegativesRankingLoss` из sentence-transformers, но рассматривается отдельно из-за явного temperature-параметра и прямого управления in-batch негативами.
-- Triplet Loss — классика metric learning, задаёт геометрию пространства через относительные расстояния.
-- CosineSimilarityLoss — единственный метод с явным supervision сигналом: либо label-derived (NLI), либо human similarity annotations (STS train).
+**Команда:** Не сошлось b\_d  
+**Участники:** Нечепоренко Дарья Евгеньевна
 
 ---
 
-## Supervision strategies
+## Аннотация
 
-Помимо выбора loss function, сравниваются три стратегии supervision:
-
-| Режим | Датасет | Описание |
-|-------|---------|----------|
-| `nli_only` | SNLI + MNLI | Entailment/contradiction как суррогатный сигнал схожести |
-| `sts_only` | STS train | Human similarity annotations (5749 пар, нормализованы /5.0) |
-| `nli_plus_sts` | NLI → STS | Двухэтапное: Stage 1 на NLI, Stage 2 fine-tuning на STS |
-
-**Evaluation protocol (без утечки):**
-- `STS train` → для обучения (только в режимах `sts_only` и `nli_plus_sts`)
-- `STS dev` → для валидации во время обучения и подбора гиперпараметров
-- `STS test` → только для финальной оценки, не используется до конца обучения
+В данной работе исследуется, как выбор целевой функции влияет на качество предложенческих эмбеддингов, получаемых путём дообучения предобученных трансформеров. Рассматриваются три подхода: InfoNCE loss с температурным параметром, triplet loss с маржой и cosine similarity loss. Для каждой функции потерь проводится сравнительный анализ скорости сходимости и итогового качества на задаче семантического сходства. Дополнительно сравниваются два режима supervision: обучение на корпусе NLI (суррогатная разметка) и обучение на STS Benchmark train (человеческие оценки схожести). Эксперименты проводятся на двух архитектурах (MiniLM-L6, BERT-base), метрикой качества служит корреляция Спирмена между косинусным сходством эмбеддингов и человеческими оценками на STS Benchmark test.
 
 ---
 
-## Backbone models
+## Список литературы
 
-| Model | Size | Параметры |
-|-------|------|-----------|
-| `sentence-transformers/all-MiniLM-L6-v2` | Small | ~22M |
-| `bert-base-uncased` | Medium | ~110M |
-| `roberta-large` | Large | ~355M |
-
-Stage 1 сравнивает loss functions на `bert-base-uncased`. Stage 2 берёт лучшую конфигурацию и сравнивает backbone sizes.
+1. Gao T., Yao X., Chen D. SimCSE: Simple Contrastive Learning of Sentence Embeddings // EMNLP 2021. arXiv: 2104.08821.
+2. Reimers N., Gurevych I. Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks // EMNLP 2019. arXiv: 1908.10084.
+3. Wang T., Isola P. Understanding Contrastive Representation Learning through Alignment and Uniformity on the Hypersphere // ICML 2020. arXiv: 2005.10242.
+4. van den Oord A., Li Y., Vinyals O. Representation Learning with Contrastive Predictive Coding // arXiv: 1807.03748, 2018.
+5. Giorgi J. et al. DeCLUTR: Deep Contrastive Learning for Unsupervised Textual Representations // ACL 2021. arXiv: 2006.03659.
 
 ---
 
-## Установка
+---
+
+# Структура презентации
+
+## Слайд 1 — Титул
+
+**Заголовок:**  
+Влияние выбора контрастивной функции потерь на качество обучения предложенческих эмбеддингов
+
+**Подзаголовок / метаданные:**
+- Команда: Не сошлось b\_d
+- Участник: Нечепоренко Дарья Евгеньевна
+- Курс / конференция
+
+---
+
+## Слайд 2 — Постановка задачи
+
+**Заголовок:** Зачем это исследовать?
+
+**Содержание:**
+
+Sentence embeddings — плотные векторные представления предложений, в которых семантически близкие предложения расположены рядом в пространстве. Они являются основой для задач semantic search, question answering, document clustering и NLI.
+
+Предобученные трансформеры (BERT, MiniLM) дают текстовые представления, но они не оптимизированы для задачи семантического сходства напрямую. Fine-tuning с контрастивными функциями потерь позволяет адаптировать эмбеддинговое пространство под эту задачу.
+
+**Открытый вопрос:** Какая функция потерь эффективнее — и зависит ли ответ от режима supervision?
+
+**Схема** (рекомендуется нарисовать):
+```
+Предложение 1  →  Encoder  →  эмбеддинг e1  ─┐
+                                               ├─→  Loss(e1, e2, ...)  →  обновление весов
+Предложение 2  →  Encoder  →  эмбеддинг e2  ─┘
+```
+
+**Метрика оценки:** корреляция Спирмена между `cosine_sim(e1, e2)` и человеческими оценками схожести на STS Benchmark (значения от 0 до 5, нормализованные в [0, 1]).
+
+---
+
+## Слайд 3 — Функции потерь: описание и формулы
+
+**Заголовок:** Три подхода к обучению эмбеддингов
+
+### InfoNCE (NT-Xent)
+
+Идея: сблизить пару (anchor, positive) и оттолкнуть от всех остальных примеров в батче одновременно.
+
+```
+L_InfoNCE = -log( exp(sim(a, p) / τ) / Σ_j exp(sim(a, j) / τ) )
+```
+
+- `sim(u, v) = cos(u, v)` — косинусное сходство нормализованных векторов
+- `τ = 0.05` — температурный параметр (чем меньше, тем резче распределение)
+- Все примеры батча кроме positive служат in-batch негативами
+- Формально: cross-entropy по диагонали матрицы сходств
+
+### Triplet Loss
+
+Идея: задать относительный порядок расстояний — позитивный пример ближе, чем негативный, с запасом margin.
+
+```
+L_Triplet = max(0,  d(a, p)  −  d(a, n)  +  margin)
+```
+
+- `d(u, v) = 1 − cos(u, v)` — косинусное расстояние
+- `margin = 0.3` — минимальный желаемый зазор между позитивным и негативным расстоянием
+- Тройки: (anchor, positive, negative) из корпуса NLI или STS
+
+### Cosine Similarity Loss (MSE)
+
+Идея: напрямую регрессировать косинусное сходство к целевому числовому скору.
+
+```
+L_Cosine = MSE( cos(e1, e2),  target_score )
+```
+
+- `target_score ∈ [0, 1]` — для NLI: entailment=1.0, neutral=0.5, contradiction=0.0; для STS: human\_score / 5.0
+- Единственный лосс с явным числовым supervision сигналом
+
+---
+
+## Слайд 4 — Сравнение функций потерь: таблица
+
+**Заголовок:** Чем отличаются подходы?
+
+| Свойство | InfoNCE | Triplet | Cosine MSE |
+|---|---|---|---|
+| **Входные данные** | (anchor, positive) | (anchor, positive, negative) | (s1, s2, score) |
+| **Тип supervision** | Бинарный (похожи / нет) | Относительный порядок | Числовой скор |
+| **Негативы** | In-batch автоматически | Явные негативы | Не нужны |
+| **Температура** | τ = 0.05 | — | — |
+| **Margin** | — | 0.3 | — |
+| **Качество негативов** | Зависит от batch size | Определяется порогами | — |
+| **Требует STS для обучения?** | Нет (NLI достаточно) | Нет (NLI достаточно) | Нет (NLI: авто-скоры) |
+
+---
+
+## Слайд 5 — Датасеты и подготовка данных
+
+**Заголовок:** Откуда берутся данные для обучения и оценки
+
+### Обучающие корпуса
+
+**SNLI + MNLI** (NLI-only режим):
+- ~550 000 пар предложений с метками: *entailment*, *neutral*, *contradiction*
+- Для InfoNCE: пары (premise, hypothesis) с меткой entailment → (anchor, positive)
+- Для Triplet: тройки (premise, entailment\_hyp, contradiction\_hyp)
+- Для Cosine: пары + скор: entailment=1.0, neutral=0.5, contradiction=0.0
+
+**STS Benchmark train** (STS-only режим):
+- 5 749 пар предложений с человеческими оценками схожести [0, 5] → нормализованы в [0, 1]
+- Для InfoNCE: пары с score ≥ 0.5 как (anchor, positive)
+- Для Triplet: тройки, где positive: score ≥ 0.6; negative: score ≤ 0.3
+- Для Cosine: все пары с нормализованным скором напрямую
+
+### Оценочный корпус
+
+**STS Benchmark** (только для оценки, не для обучения):
+- `STS dev` (1 500 пар) — валидация во время обучения, выбор лучшего чекпоинта
+- `STS test` (1 379 пар) — финальная оценка, **не используется ни разу во время обучения**
+
+### Evaluation protocol
+
+Spearman ρ между `cosine_sim(e1, e2)` и нормализованными человеческими оценками на STS test.
+
+---
+
+## Слайд 6 — Модели и базовые показатели (Baseline)
+
+**Заголовок:** Предобученные модели без fine-tuning
+
+### Используемые архитектуры
+
+| Модель | Параметры | Слоёв | Скрытое состояние | Особенность |
+|---|---|---|---|---|
+| `all-MiniLM-L6-v2` | ~22M | 6 | 384 | Уже дистиллирована для sentence similarity |
+| `bert-base-uncased` | ~110M | 12 | 768 | Общее предобучение, не специализирована |
+
+### Baseline Spearman (STS test, mean pooling, без fine-tuning)
+
+| Модель | Spearman (STS test) |
+|---|---|
+| MiniLM-L6 | **0.8203** |
+| BERT-base | **0.4729** |
+
+**Ключевое наблюдение:** MiniLM-L6 изначально очень сильная (уже дообучена для похожей задачи). BERT-base — слабый baseline, что создаёт большой потенциал для улучшения.
+
+---
+
+## Слайд 7 — Постановка эксперимента
+
+**Заголовок:** Детали эксперимента
+
+### Сетка гиперпараметров
+
+**Итого: 2 × 2 × 3 × 4 = 48 запусков**
+
+| Ось | Значения |
+|---|---|
+| Модели | MiniLM-L6, BERT-base |
+| Режимы supervision | NLI-only, STS-only |
+| Функции потерь | InfoNCE, Triplet, Cosine |
+| Learning rate | 1e-5, 2e-5, 3e-5, 5e-5 |
+
+### Ключевые детали обучения
+
+**Заморозка слоёв:** обучаются только последние 2 трансформерных блока + pooler. Всё остальное (embedding layer, слои 0–9 у BERT, 0–3 у MiniLM) заморожено.
+
+- BERT-base: обучается ~12% параметров (~13M из ~110M)
+- MiniLM-L6: обучается ~20% параметров (~4.5M из ~22M)
+
+**Мотивация заморозки:** ускорение обучения, снижение риска catastrophic forgetting предобученных знаний, снижение переобучения на малых STS данных.
+
+**Прочие настройки:**
+- Оптимизатор: AdamW, weight\_decay=1e-2
+- Scheduler: linear warmup (100 шагов) + linear decay
+- Число эпох: 10
+- Batch size: 64
+- Mixed precision (fp16): включено при наличии CUDA
+- Gradient clipping: max\_grad\_norm=1.0
+- Pooling: mean pooling по токенам с учётом attention mask
+- Чекпоинт: сохраняется модель с **лучшим Spearman на STS dev** (не последняя эпоха)
+- Seed: 42 для воспроизводимости
+
+---
+
+## Слайд 8 — Результаты: тепловые карты (Heatmap)
+
+**Заголовок:** Лучший Spearman по комбинациям модель × лосс
+
+*Использовать: `outputs/plots/heatmap_modes.png`*
+
+Два heatmap рядом — NLI-only (слева) и STS-only (справа).
+
+| | InfoNCE | Triplet | Cosine |
+|---|---|---|---|
+| **MiniLM (NLI only)** | **0.834** | 0.770 | 0.755 |
+| **BERT (NLI only)** | **0.796** | 0.723 | 0.707 |
+| **MiniLM (STS only)** | 0.826 | 0.826 | **0.853** |
+| **BERT (STS only)** | 0.764 | 0.731 | **0.820** |
+
+**Выводы:**
+- При NLI-supervision лидирует **InfoNCE** — in-batch негативы из большого корпуса создают плотный обучающий сигнал
+- При STS-supervision лидирует **Cosine** — числовой скор идеально совпадает с метрикой оценки
+- Triplet занимает промежуточную позицию в обоих режимах
+
+---
+
+## Слайд 9 — Результаты: NLI-only vs STS-only
+
+**Заголовок:** Какой режим supervision лучше?
+
+*Использовать: `outputs/plots/mode_comparison.png`*
+
+По две столбца на каждый лосс (синий = NLI, оранжевый = STS):
+
+| Лосс | MiniLM NLI | MiniLM STS | BERT NLI | BERT STS |
+|---|---|---|---|---|
+| InfoNCE | 0.834 | 0.826 | 0.796 | 0.764 |
+| Triplet | 0.770 | 0.826 | 0.723 | 0.731 |
+| Cosine | 0.755 | **0.853** | 0.707 | **0.820** |
+
+**Выводы:**
+- Для **Cosine loss**: STS значительно лучше — supervision сигнал напрямую соответствует метрике
+- Для **InfoNCE**: NLI немного лучше для обеих моделей — большой корпус (550K пар) vs маленький STS train (5.7K)
+- Для **Triplet**: STS немного лучше или паритет
+- **Победитель по режиму:** STS-only обгоняет NLI-only в большинстве случаев, несмотря на в ~100× меньший датасет
+
+**Важная методологическая оговорка:**  
+Преимущество STS-only отчасти объясняется консистентностью распределений: обучающий (STS train), валидационный (STS dev) и тестовый (STS test) наборы взяты из одного бенчмарка с одинаковой схемой аннотации. Модель оптимизируется ровно под тот сигнал, по которому потом валидируется и тестируется.  
+NLI-supervision, напротив, вносит шум: метки entailment/neutral/contradiction — суррогат сходства, а не прямая его оценка. Перевод в числовые скоры (1.0 / 0.5 / 0.0) — грубая аппроксимация. Следствие: NLI-корпус частично «грязный» с точки зрения задачи STS, и модель вынуждена учить косвенный перенос на другое распределение. Это нужно учитывать при интерпретации результатов: преимущество STS-only — не только качество данных, но и близость train/eval дистрибуций.
+
+---
+
+## Слайд 10 — Результаты: Сравнение моделей
+
+**Заголовок:** MiniLM-L6 vs BERT-base
+
+*Использовать: `outputs/plots/model_comparison.png` и `outputs/plots/baseline_vs_trained.png`*
+
+**Прирост относительно baseline:**
+
+| Модель | Baseline | Лучший fine-tuned | Прирост |
+|---|---|---|---|
+| MiniLM-L6 | 0.8203 | **0.8529** | +0.033 |
+| BERT-base | 0.4729 | **0.8200** | +**0.347** |
+
+**Выводы:**
+- BERT-base стартует с низкого baseline (не специализирован) → после fine-tuning почти догоняет MiniLM
+- MiniLM уже сильная — fine-tuning даёт небольшой, но стабильный прирост
+- Оба хорошо реагируют на STS-only + Cosine
+- **Средний Spearman:** MiniLM (0.807) > BERT (0.750) по всем 24 конфигурациям
+
+---
+
+## Слайд 11 — Результаты: Сходимость train loss
+
+**Заголовок:** Как сходится функция потерь при разных LR?
+
+*Использовать: `outputs/plots/train_loss_info_nce.png`, `train_loss_triplet.png`, `train_loss_cosine.png`*
+
+По одному рисунку на слайд или все три рядом (2×2 подграфика в каждом: 2 модели × 2 режима). На каждом — 4 кривые по 4 LR.
+
+**Выводы:**
+- **InfoNCE:** при lr=5e-5 наблюдается более нестабильное начало обучения (большие осцилляции loss), при малых LR сходимость плавная
+- **Triplet:** лосс стабильно убывает при всех LR; при большом LR иногда небольшие всплески
+- **Cosine:** самый гладкий loss — MSE-регрессия предсказуемо убывает; NLI-only сходится медленнее, чем STS-only (из-за большего датасета)
+- Кривые STS-only значительно короче по числу шагов (датасет в ~100× меньше)
+
+---
+
+## Слайд 12 — Результаты: Динамика Spearman(val) по эпохам
+
+**Заголовок:** Когда достигается лучшая точка?
+
+*Использовать: `outputs/plots/val_spearman_info_nce.png`, `val_spearman_triplet.png`, `val_spearman_cosine.png`*
+
+Звёздочкой отмечена эпоха, на которой сохранён чекпоинт.
+
+**Выводы:**
+- **InfoNCE (NLI):** лучшая точка обычно на эпохах 5–9; кривые относительно стабильны после 3-й эпохи
+- **Triplet:** лучшая точка часто на эпохах 1–4; после некоторого момента небольшое ухудшение (признаки переобучения при больших LR)
+- **Cosine (STS-only):** лучшая точка на эпохах 4–8; очень быстрый выход на плато из-за малого датасета
+- **Ключевое наблюдение:** сохранение по лучшей валидации критично — использование финальной эпохи ухудшило бы результаты в нескольких конфигурациях
+
+---
+
+## Слайд 13 — Результаты: Чувствительность к LR
+
+**Заголовок:** Насколько критичен выбор learning rate?
+
+*Использовать: `outputs/plots/lr_sensitivity.png` и `outputs/plots/stability.png`*
+
+2×2 сетка: для каждой (модель, режим) — три кривые Spearman vs LR.
+
+**Числовые данные:**
+
+| Лосс | Лучший LR (MiniLM, NLI) | Лучший LR (BERT, NLI) |
+|---|---|---|
+| InfoNCE | **3e-5** (0.8335) | **5e-5** (0.7962) |
+| Triplet | **1e-5** (0.7698) | **2e-5** (0.7228) |
+| Cosine | **1e-5** (0.7554) | **5e-5** (0.7069) |
+
+**Выводы:**
+- **InfoNCE** наиболее стабилен к LR — разброс результатов по 4 LR минимален
+- **Cosine (NLI-only)** наиболее чувствителен — кривая ярко выраженная, неправильный LR сильно снижает качество
+- **STS-only** режим в целом менее чувствителен к LR, чем NLI-only — малый датасет меньше позволяет переобучиться
+- Для практического применения рекомендуется lr=3e-5 как хороший компромисс
+
+---
+
+## Слайд 14 — Результаты: Grad Norm и время обучения
+
+**Заголовок:** Стабильность обучения и вычислительные затраты
+
+*Использовать: `outputs/plots/grad_norm.png` и `outputs/plots/time_vs_quality.png`*
+
+**Grad Norm (левая часть слайда):**
+
+- Нормы градиентов у InfoNCE заметно выше в начале обучения — активное использование in-batch негативов создаёт сильный сигнал
+- Triplet и Cosine имеют более стабильные нормы на протяжении всего обучения
+- Gradient clipping (порог 1.0) срабатывает чаще при InfoNCE + больших LR
+
+**Время обучения (правая часть слайда):**
+
+| Режим | Модель | Loss | Время |
+|---|---|---|---|
+| NLI-only | BERT-base | Cosine | ~173 мин |
+| NLI-only | BERT-base | InfoNCE | ~63 мин |
+| NLI-only | MiniLM-L6 | InfoNCE | ~35 мин |
+| STS-only | любая | любой | **< 3 мин** |
+
+**Выводы:**
+- STS-only в 30–100× быстрее, чем NLI-only — при сопоставимом или лучшем качестве
+- NLI-only + Cosine — самый дорогой вариант, при этом не лучший по качеству
+- Scatter plot time vs quality показывает: правый нижний угол (быстро + качественно) занят STS-only + Cosine/InfoNCE
+
+---
+
+## Слайд 15 — Рейтинг функций потерь
+
+**Заголовок:** Итоговый рейтинг: какой лосс лучше?
+
+*Использовать: `outputs/plots/loss_ranking.png`*
+
+Столбчатая диаграмма: среднее ± std Spearman по всем 16 настройкам на лосс; звёздочка = максимум.
+
+| Ранг | Лосс | Среднее Spearman | Std | Максимум |
+|---|---|---|---|---|
+| 1 | **InfoNCE** | **0.802** | ±0.028 | 0.834 |
+| 2 | **Cosine** | **0.777** | ±0.056 | 0.853 |
+| 3 | **Triplet** | **0.756** | ±0.038 | 0.826 |
+
+**Выводы:**
+- **InfoNCE** — лучший по среднему и наиболее стабильный (меньший std)
+- **Cosine** — лучший максимум (0.853), но менее стабильный: сильно зависит от режима supervision
+- **Triplet** — стабильный средний результат, но нигде не лидирует
+- Победитель зависит от задачи: если есть размеченные пары с числовыми оценками → Cosine; если только метки NLI → InfoNCE
+
+---
+
+## Слайд 16 — Глобальные выводы
+
+**Заголовок:** Что выяснили?
+
+### Главные результаты
+
+1. **Лучшая конфигурация:** MiniLM-L6 + STS-only + Cosine loss + lr=5e-5 → **Spearman = 0.853**
+
+2. **Влияние лосса зависит от данных:**
+   - NLI-corpus → InfoNCE лучше (in-batch негативы из 550K пар)
+   - STS-annotations → Cosine лучше (supervision напрямую совпадает с метрикой)
+
+3. **STS-only: неожиданно эффективен:** 5 749 пар с человеческими оценками дают результат не хуже, а порой лучше, чем 550 000 пар NLI — при в 100× меньших вычислительных затратах. **Частичное объяснение:** STS train/dev/test — один бенчмарк, одна схема аннотации → консистентность распределений. NLI-датасет использует суррогатный сигнал (entailment ≠ similarity), который частично «грязный» и требует переноса на другое распределение.
+
+4. **BERT-base улучшается кардинально:** baseline 0.473 → fine-tuned 0.820 (+0.347) — дообучение критически важно для моделей без специализации
+
+5. **InfoNCE наиболее стабилен к LR** — практически важно для быстрого подбора гиперпараметров
+
+6. **Заморозка слоёв работает:** обучение ~10–20% параметров достаточно для значимого улучшения качества
+
+### Ответы на исследовательские вопросы
+
+| Вопрос | Ответ |
+|---|---|
+| Какой лосс лучший? | InfoNCE (в среднем), Cosine (максимум при правильных данных) |
+| Какой лосс стабильнее к LR? | InfoNCE |
+| NLI vs STS supervision? | STS быстрее и часто лучше при наличии аннотаций |
+| Важен ли размер модели? | MiniLM > BERT в среднем, но BERT сильнее улучшается |
+
+### Дальнейшие направления
+
+- Добавить RoBERTa-large для проверки гипотезы о масштабировании
+- Попробовать двухэтапное обучение NLI → STS (nli\_plus\_sts)
+- Исследовать влияние температуры τ в InfoNCE
+- Сравнить с SupCon loss и Angle-optimized loss
+
+---
+
+## Приложение: Воспроизведение экспериментов
 
 ```bash
 pip install -r requirements.txt
+
+# Подготовка данных
+python -c "from data_utils.prepare_nli import prepare_and_save; prepare_and_save('data/processed', 'data/cache')"
+python -c "from data_utils.prepare_sts import prepare_sts_and_save; prepare_sts_and_save('data/processed', 'data/cache')"
+
+# Запуск всех 48 экспериментов
+python run_all_experiments.py --skip_existing
+
+# Анализ результатов
+jupyter notebook notebooks/analysis.ipynb
 ```
 
----
-
-## Скачивание датасетов
-
-```bash
-python data_utils/download_datasets.py
+**Структура outputs:**
 ```
-
-Для быстрого тестирования (ограничить NLI выборку):
-
-```bash
-python data_utils/download_datasets.py --max_samples 10000
-```
-
-Что скачивается:
-- SNLI + MNLI → `data/processed/nli_pairs.pkl`, `nli_triplets.pkl`, `nli_cosine.pkl`
-- STS Benchmark (train/val/test) → `data/processed/sts_train.pkl`, `sts_val.pkl`, `sts_test.pkl`
-
----
-
-## Обучение одного эксперимента
-
-```bash
-# InfoNCE на NLI, LR=2e-5
-python train.py --config experiments/info_nce_nli.yaml --lr 2e-5
-
-# Cosine на STS train (human annotations)
-python train.py --config experiments/cosine_sts.yaml --lr 2e-5
-
-# Two-stage: NLI → STS fine-tuning
-python train.py --config experiments/cosine_nli_plus_sts.yaml --lr 2e-5
-
-# С другим backbone
-python train.py --config experiments/info_nce_nli.yaml --lr 2e-5 \
-    --backbone sentence-transformers/all-MiniLM-L6-v2
-```
-
----
-
-## Запуск всех экспериментов
-
-### Stage 1 — Loss × Supervision strategy × LR sweep
-
-```bash
-python run_all_experiments.py
-```
-
-С ограничением выборки:
-
-```bash
-python run_all_experiments.py --max_train_samples 5000 --skip_existing
-```
-
-Выбрать конкретные эксперименты:
-
-```bash
-python run_all_experiments.py --experiments info_nce triplet cosine cosine_sts cosine_nli_plus_sts
-```
-
-### Stage 2 — Backbone comparison
-
-```bash
-python run_all_experiments.py --stage2
-```
-
-Запускает лучшую конфигурацию из Stage 1 на всех трёх backbone.
-
----
-
-## Evaluation
-
-```bash
-python evaluate.py \
-  --config experiments/info_nce_nli.yaml \
-  --checkpoint outputs/info_nce/nli_only/BERT-base/lr_2_0e-05/checkpoints/best_model.pt \
-  --plot_embeddings
-```
-
----
-
-## Сравнение результатов
-
-```bash
-python compare_results.py
-```
-
-Выводит:
-1. Лучший Spearman по каждой loss function (NLI-only)
-2. Сравнение supervision strategies (NLI / STS / NLI+STS)
-3. Сравнение backbone sizes (если запускался Stage 2)
-4. Анализ чувствительности к LR
-5. Divergence report
-
-Генерирует графики в `outputs/plots/`.
-
----
-
-## Структура экспериментальных конфигов
-
-```text
-experiments/
-├── info_nce_nli.yaml       # InfoNCE | NLI only
-├── triplet_nli.yaml        # Triplet  | NLI only
-├── cosine_nli.yaml         # Cosine   | NLI only
-├── cosine_sts.yaml         # Cosine   | STS train (human annotations)
-└── cosine_nli_plus_sts.yaml # Cosine  | Two-stage: NLI → STS
-```
-
----
-
-## Структура outputs
-
-```text
 outputs/
-├── info_nce/nli_only/BERT-base/lr_*/
+├── {loss}/{mode}/{backbone}/lr_{value}/
 │   ├── checkpoints/best_model.pt
-│   ├── logs/train_log.csv     # epoch, step, train_loss, lr, grad_norm
-│   ├── logs/val_log.csv       # epoch, spearman_score, stage, epoch_time_s
+│   ├── logs/train_log.csv     # step, train_loss, lr, grad_norm
+│   ├── logs/val_log.csv       # epoch, spearman_score, epoch_time_s
 │   └── metrics/result.json
-├── cosine/sts_only/BERT-base/lr_*/
-├── cosine/nli_plus_sts/BERT-base/lr_*/
-├── plots/                     # все графики
-└── all_results.csv
+├── baseline.csv
+└── plots/                     # все 12 графиков из ноутбука
 ```
-
----
-
-## Генерируемые графики
-
-| График | Файл | Описание |
-|--------|------|----------|
-| Train Loss vs Steps | `train_loss_comparison.png` | Лучший LR на каждый метод |
-| Spearman vs Epochs | `spearman_vs_epochs.png` | Сходимость на val set |
-| Spearman vs LR | `spearman_vs_lr.png` | LR sensitivity |
-| Stability Heatmap | `stability_heatmap.png` | Loss × LR matrix |
-| Convergence per Loss | `convergence_{loss}.png` | Все LR на одном графике |
-| Time vs Quality | `time_vs_quality.png` | Trade-off scatter |
-| Gradient Norms | `grad_norm.png` | Стабильность градиентов |
-| Supervision Comparison | `supervision_comparison.png` | NLI / STS / NLI+STS |
-| STS Fine-tuning Effect | `sts_finetuning_effect.png` | Delta Spearman от Stage 2 |
-| Backbone Comparison | `backbone_comparison.png` | MiniLM / BERT / RoBERTa |
-| PCA / t-SNE | `pca_{loss}.png`, `tsne_{loss}.png` | Проекция эмбеддингов |
-
----
-
-## Исследовательские вопросы
-
-1. Какая loss function даёт лучшую Spearman корреляцию на STS Benchmark?
-2. Какая более устойчива к выбору LR (маленький std по LR-grid)?
-3. Улучшают ли human similarity annotations (STS train) качество embeddings по сравнению с entailment-only?
-4. Что эффективнее: NLI supervision vs human similarity supervision vs двухэтапное?
-5. Есть ли дивергенция / коллапс эмбеддингов при больших LR?
-6. Как размер backbone влияет на итоговое качество?
-
----
-
-## Reproducibility
-
-```python
-random.seed(42)
-numpy.random.seed(42)
-torch.manual_seed(42)
-torch.cuda.manual_seed_all(42)
-```
-
-Фиксируется для каждого запуска через `config.seed`.
-
----
-
-## Требования к железу
-
-- GPU с CUDA рекомендован (fp16 mixed precision)
-- VRAM: минимум 8 GB (уменьшить `batch_size` при нехватке)
-- RAM: 16 GB для полного SNLI + MNLI
-
-Без GPU код работает на CPU (медленнее).
